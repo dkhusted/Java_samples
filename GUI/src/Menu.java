@@ -9,11 +9,11 @@ import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JRadioButtonMenuItem;
-import javax.crypto.SecretKeyFactory;
-import javax.swing.Action;
+import java.util.concurrent.ExecutorService;  
+import java.util.concurrent.Executors;  
 import javax.swing.ButtonGroup;
 import javax.swing.JMenuBar;
-import javax.swing.KeyStroke;
+
 import javax.swing.ImageIcon;
 
 import javax.swing.JPanel;
@@ -24,13 +24,16 @@ import javax.swing.JFrame;
 import java.net.*;
 import java.io.*;
 
+import java.net.Socket;
+import java.net.ServerSocket;
 /*
  * This is a very basic version of MSN. 
  * User will write their username, ip adress of them self, and of the person who they want to connect to.
  * Then they can send messages back and forth.
  * 
  */
-public class Menu implements ActionListener, ItemListener {
+
+public class Menu implements ActionListener, ItemListener  {
     JTextArea output;
     JScrollPane scrollPane;
     String newline = "\n";
@@ -46,11 +49,21 @@ public class Menu implements ActionListener, ItemListener {
 
     //Server Stuff1
     InetAddress localAddress = null;
-    PrintWriter out = null;
+    PrintStream out = null;
     BufferedReader in = null;
     Socket clientSocket = null;
     Boolean clientSocketSet = false;    
     ServerSocket serverSocket = null;
+    Boolean setEchoServer = false;
+
+    //Thread stuff
+    Thread thread_echoServer = null;
+
+    class Control{
+        public volatile boolean killEchoServerFlag = false;
+        public volatile boolean EchoServerFlag = false;
+    }
+    final Control control = new Control();
 
     public void setName (String name){
         try {
@@ -120,7 +133,7 @@ public class Menu implements ActionListener, ItemListener {
         JMenuBar menuBar;
         JMenu menu;
         JMenuItem menuItem;
-        JRadioButtonMenuItem rbMenuItem;
+        JRadioButtonMenuItem rbEchoServer;
         ImageIcon icon = createImageIcon("images/middle.gif");
         Object[] nullOptions = null;
 
@@ -195,68 +208,77 @@ public class Menu implements ActionListener, ItemListener {
                 });
         menu.add(menuItem);
 
-        // This opens a simple echo server on the set Port number
+        // This opens a input window to write to the echo server. Echo server must be created before hand.
         menuItem = new JMenuItem("Echo Server", KeyEvent.VK_0);
         menuItem.getAccessibleContext().setAccessibleDescription(
                 "This is a simple echo server running on the chosen port");
                 menuItem.addActionListener(new ActionListener(){
-                    public void actionPerformed(ActionEvent e) {
-                        if(echoServer()){
-                        String s = (String)JOptionPane.showInternalInputDialog(
-                            frame.getContentPane(),
-                            "Please enter a message.",
-                            "This is a echo server",JOptionPane.PLAIN_MESSAGE, icon,nullOptions,null);
-                            //If a string was returned, say so.
-                            if ((s != null) && (s.length() > 0)) {
-                                // if("quit".equalsIgnoreCase(s)){
-                                //     try {
-                                //         clientSocket.close();   
-
-                                //     } catch (IOException ee) {
-                                //         String errormsg = "Exception caught when trying to socket on port:" + portNr + newline + ee.getMessage() + newline;
-                                //         output.append(errormsg + newline);
-                                //         output.setCaretPosition(output.getDocument().getLength());
-                                //     }
-                                //     return;
-                                // }
-                                out.println(s);
-
-                                try {
-                                    String response = in.readLine();
-                                    output.append(response + newline);
-                                    output.setCaretPosition(output.getDocument().getLength());
-                                    clientSocket.close();
-
-                                } catch (IOException readException) {
-                                    String errormsg = "Exception caught when trying to read from socket on port:" + portNr + newline + readException.getMessage() + newline;
-                                        output.append(errormsg + newline);
-                                        output.setCaretPosition(output.getDocument().getLength());
-                                }
-                                return;
-
-                            }}
-                        else{
-                            return;
-                        }
+                    public void actionPerformed(ActionEvent e){
+                        //Put functionality here
                     }
                 });
         menu.add(menuItem);
 
 
-        // //a group of radio button menu items
-        // menu.addSeparator();
-        // ButtonGroup group = new ButtonGroup();
+        rbEchoServer = new JRadioButtonMenuItem("Activate Echo Server");
+        rbEchoServer.setSelected(true);
+        rbEchoServer.setMnemonic(KeyEvent.VK_R);
+        rbEchoServer.addActionListener(new ActionListener(){
+            public void actionPerformed(ActionEvent e){
+                //Should check if all the settings are set before creating a thread.
+                if(portNrSet){
+                new Thread(() -> {
+                    echoServer();
+                }).start();
+                    output.append("Echo server has been created" + newline);
+                    output.setCaretPosition(output.getDocument().getLength());
 
-        // rbMenuItem = new JRadioButtonMenuItem("A radio button menu item");
-        // rbMenuItem.setSelected(true);
-        // rbMenuItem.setMnemonic(KeyEvent.VK_R);
-        // group.add(rbMenuItem);
-        // rbMenuItem.addActionListener(this);
-        // menu.add(rbMenuItem);
+                }
+                
+                else if(!portNrSet){
+                        String s = "Error: The Port number is not set." + newline;
+                       output.append(s + newline);
+                       output.setCaretPosition(output.getDocument().getLength());
+                        return;
+                    }
+                    else{
+                        String s = "Error: Unknow error, this text should not be displayed." + newline;
+                       output.append(s + newline);
+                       output.setCaretPosition(output.getDocument().getLength());
+                       return;
+                    }
+            }
+        });
+        menu.add(rbEchoServer);
+        /*
+        BUG: Freezes GUI when trying to deactivate Echo Server...
 
-        //submenu
-        // menu.addSeparator();
-                //Build the first menu.
+        rbEchoServer = new JRadioButtonMenuItem("Deactivate Echo Server");
+        rbEchoServer.setSelected(true);
+        rbEchoServer.setMnemonic(KeyEvent.VK_R);
+        rbEchoServer.addActionListener(new ActionListener(){
+            public void actionPerformed(ActionEvent e){
+                String s = Thread.currentThread().getName();
+                try {
+                    Thread.currentThread().join();
+                    if (!Thread.currentThread().isAlive()){
+                        output.append("Thread:" + s +" is still alive");
+                        output.setCaretPosition(output.getDocument().getLength());
+                    }
+                } catch (Exception error) {
+                    output.append("Caught exception in thread handling: ");
+                    output.append(error.getMessage());
+                    output.setCaretPosition(output.getDocument().getLength());
+                }
+                output.append("Echo server running on " + s + "been deactivated" + newline);
+                output.setCaretPosition(output.getDocument().getLength());
+                }
+            });
+        menu.add(rbEchoServer);
+        */
+
+
+        //Build the first menu.
         menu = new JMenu("Help");
         menu.setMnemonic(KeyEvent.VK_A);
         menu.getAccessibleContext().setAccessibleDescription(
@@ -298,15 +320,6 @@ public class Menu implements ActionListener, ItemListener {
                     }
                 });
         menu.add(menuItem);
-
-
-        /*
-         * TO DO:
-         * How can i create a echo server in Java?
-         * Convert echo server into messagenger
-         * Needs to make handshake with the remote server.
-         */
-
         return menuBar;
     }
 
@@ -371,54 +384,119 @@ public class Menu implements ActionListener, ItemListener {
         }
     }
 
-    private Boolean echoServer(){
-        
-        if(this.portNrSet && this.userNameSet){
+    private void echoServerResponder(){
+
+    }
+
+    
+    private void echoServer(){
+            String threadname = Thread.currentThread().getName();
+            output.append("Echo server threadname:"+threadname + newline);
+            output.setCaretPosition(output.getDocument().getLength());
+            
             try {
-                this.localAddress = InetAddress.getLocalHost();
+                //create server socket
                 this.serverSocket =
                     new ServerSocket(this.portNr);
-                this.clientSocket = serverSocket.accept();     
+                control.EchoServerFlag = true;
+
             } catch (IOException e) {
                 String s = "Exception caught when trying to listen on port:" + this.portNr + "or listening for a connection"
                  + newline + e.getMessage() + newline;
                 output.append(s + newline);
                 output.setCaretPosition(output.getDocument().getLength());
+                this.setEchoServer = false;
+                control.EchoServerFlag = false;
+                return;
             }
             try {
-                this.in = new BufferedReader(
-                new InputStreamReader(
-                    this.clientSocket.getInputStream()));
-                this.out = new PrintWriter(
-                    this.clientSocket.getOutputStream(), true);
-    
-            } catch (IOException e) {
-                String s = "Exception caught when trying write to port:" + this.portNr + newline + e.getMessage() + newline;
-               output.append(s + newline);
-               output.setCaretPosition(output.getDocument().getLength());
+                    //while(true){
+                    //Waiting for connection requests
+
+                    /*
+                     * Since accept bloks until someone connects we should create a new thread everytime someone connects.
+                     * GUI will see all messages, should send messages back to all clients, like messenger.
+                     */
+                    ExecutorService executor = Executors.newFixedThreadPool(5);
+                    
+                    //Everytime we get a new client request, accept returns a socket for communicating with that client.
+                    while((clientSocket = serverSocket.accept()) != null){
+                       try {
+                            executor.execute(new Thread(() -> {
+                                //Code goes here
+                                synchronized(this){
+                                    output.append("Accepted connection from client" + newline);   
+                                    output.setCaretPosition(output.getDocument().getLength());
+                                }
+
+                            }));
+                       } catch (Exception e) {
+                            synchronized(this){
+                                output.append("exception caught in thread pool block: ");
+                                output.append(e.getMessage() + newline);
+                                output.setCaretPosition(output.getDocument().getLength());
+                            }
+                       }
+                       
+                       executor.shutdown();
+                       while(!executor.isTerminated()){ }
+                       output.append("All threads have finished" + newline);   
+                       output.setCaretPosition(output.getDocument().getLength());
+
+                       
+                    }
+                    //Accept blocks until someone connects..
+                    
+                    /*##################################################################*/
+                    /*
+                    output.append("Accepted connection from client" + newline);   
+                    output.setCaretPosition(output.getDocument().getLength());
+                    
+                    //getInputStream -> InputStreamReader converts byte stream to char stream. BufferedReader is a buffer for storing char from stream
+                    in = new BufferedReader(
+                        new InputStreamReader(this.clientSocket.getInputStream()));
+                    out = new PrintStream(
+                        this.clientSocket.getOutputStream());
+                    
+
+                    // waits for data and reads it in until connection dies
+                    // readLine() blocks until the server receives a new line from client
+                    String s;
+                        while ((s = in.readLine()) != null) {
+
+                            if(s.equals("end")){
+                                System.out.println(s);
+                                output.append("Client disconnected" + newline);
+                                output.setCaretPosition(output.getDocument().getLength());
+                                in.close();
+                                break;
+                            }
+
+                            else{
+                                //Write back to client, write clients message in GUI and flush output.
+                                out.println(s);
+                                output.append(s + newline);
+                                output.setCaretPosition(output.getDocument().getLength());
+                                out.flush();
+                            }
+
+                        }
+                    //out.close();
+                    clientSocket.close();
+                    //When we reach end of try block, echo server thread should die...
+                    */
+                    /* ###################################################################### */
+
+                    } 
+
+              
+                catch (IOException e) {
+                    String s = "Exception caught when trying accepting client:" + this.portNr + newline + e.getMessage() + newline;
+                    output.append(s + newline);
+                    output.setCaretPosition(output.getDocument().getLength());
             }
-        }
-        else{
-            if(!this.portNrSet){
-                String s = "Error: The Port number is not set." + newline;
-               output.append(s + newline);
-               output.setCaretPosition(output.getDocument().getLength());
-                return false;
-            }
-            else if(!this.userNameSet){
-                String s = "Error: The username is not set." + newline;
-               output.append(s + newline);
-               output.setCaretPosition(output.getDocument().getLength());
-                return false;
-            }
-            else{
-                String s = "Error: Unknow error, this text should not be displayed." + newline;
-               output.append(s + newline);
-               output.setCaretPosition(output.getDocument().getLength());
-            }
-        }
-        return true;
-    }
+}
+        
 
     /**
      * Create the GUI and show it.  For thread safety,
