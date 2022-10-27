@@ -219,7 +219,6 @@ public class Menu implements ActionListener, ItemListener  {
                 });
         menu.add(menuItem);
 
-
         rbEchoServer = new JRadioButtonMenuItem("Activate Echo Server");
         rbEchoServer.setSelected(true);
         rbEchoServer.setMnemonic(KeyEvent.VK_R);
@@ -250,33 +249,6 @@ public class Menu implements ActionListener, ItemListener  {
             }
         });
         menu.add(rbEchoServer);
-        /*
-        BUG: Freezes GUI when trying to deactivate Echo Server...
-
-        rbEchoServer = new JRadioButtonMenuItem("Deactivate Echo Server");
-        rbEchoServer.setSelected(true);
-        rbEchoServer.setMnemonic(KeyEvent.VK_R);
-        rbEchoServer.addActionListener(new ActionListener(){
-            public void actionPerformed(ActionEvent e){
-                String s = Thread.currentThread().getName();
-                try {
-                    Thread.currentThread().join();
-                    if (!Thread.currentThread().isAlive()){
-                        output.append("Thread:" + s +" is still alive");
-                        output.setCaretPosition(output.getDocument().getLength());
-                    }
-                } catch (Exception error) {
-                    output.append("Caught exception in thread handling: ");
-                    output.append(error.getMessage());
-                    output.setCaretPosition(output.getDocument().getLength());
-                }
-                output.append("Echo server running on " + s + "been deactivated" + newline);
-                output.setCaretPosition(output.getDocument().getLength());
-                }
-            });
-        menu.add(rbEchoServer);
-        */
-
 
         //Build the first menu.
         menu = new JMenu("Help");
@@ -409,92 +381,110 @@ public class Menu implements ActionListener, ItemListener  {
                 control.EchoServerFlag = false;
                 return;
             }
-            try {
-                    //while(true){
-                    //Waiting for connection requests
-
                     /*
                      * Since accept bloks until someone connects we should create a new thread everytime someone connects.
                      * GUI will see all messages, should send messages back to all clients, like messenger.
+                     * 
+                     * we have to synchronize all access to output on GUI, otherwise we get race conditions
                      */
                     ExecutorService executor = Executors.newFixedThreadPool(5);
                     
                     //Everytime we get a new client request, accept returns a socket for communicating with that client.
-                    while((clientSocket = serverSocket.accept()) != null){
-                       try {
-                            executor.execute(new Thread(() -> {
-                                //Code goes here
-                                synchronized(this){
-                                    output.append("Accepted connection from client" + newline);   
-                                    output.setCaretPosition(output.getDocument().getLength());
-                                }
+                    try {
 
-                            }));
-                       } catch (Exception e) {
-                            synchronized(this){
-                                output.append("exception caught in thread pool block: ");
+                    while((clientSocket = serverSocket.accept()) != null){
+
+                        executor.execute(new Thread(() -> {
+                            
+                                //Code goes here
+                                Socket workerSocket = clientSocket;
+                                synchronized(this){
+                                output.append("Accepted connection from client on thread:" + Thread.currentThread().getName() 
+                                     + newline + "\t with socket name:" + workerSocket);   
+                                output.setCaretPosition(output.getDocument().getLength());
+                                }
+                                //getInputStream -> InputStreamReader converts byte stream to char stream. BufferedReader is a buffer for storing char from stream
+                                try {
+                                    in = new BufferedReader(
+                                    new InputStreamReader(workerSocket.getInputStream()));
+                                out = new PrintStream(
+                                    workerSocket.getOutputStream());
+                                } catch (IOException e) {
+                                    synchronized(this){
+                                output.append("IOException caught in thread pool block while creating Bufferred Reader and Printstream: " + newline);
                                 output.append(e.getMessage() + newline);
                                 output.setCaretPosition(output.getDocument().getLength());
-                            }
+                                    }
+                                }
+
+                            
+
+                                try {
+                                String s;
+                                while ((s = in.readLine()) != null) {
+        
+                                    if(s.equals("end")){
+                                        System.out.println(s);
+                                        synchronized(this){
+
+                                        output.append("Client:" + workerSocket + "\t" + " disconnected" + newline);
+                                        output.setCaretPosition(output.getDocument().getLength());
+                                        }
+                                        in.close();
+                                        break;
+                                    }
+        
+                                    else{
+                                        //Write back to client, write clients message in GUI and flush output.
+                                        //Får vi måske race condition når 2 clients prøver at skrive til serveren?
+                                        
+                                            out.println(s);
+
+                                            synchronized(this){
+                                            output.append(s + newline);
+                                            output.setCaretPosition(output.getDocument().getLength());
+                                            }
+
+                                            out.flush();
+                                        
+                                        
+                                    }
+        
+                                }
+
+                                } catch (Exception e) {
+                                    synchronized(this){
+                                    output.append("Exception caught in thread pool block (in.ReadLine): " + newline);
+                                    output.append(e.getMessage() + newline);
+                                    output.setCaretPosition(output.getDocument().getLength());
+                                    }
+                                }
+
+                                try {
+                                    workerSocket.close();
+                                } catch (Exception e) {
+                                    synchronized(this){
+                                    output.append("Exception caught in thread pool block while closing workerSocket: " + workerSocket + newline);
+                                    output.append(e.getMessage() + newline);
+                                    output.setCaretPosition(output.getDocument().getLength());
+                                    }
+                                }
+                            }));
                        }
+
                        
                        executor.shutdown();
                        while(!executor.isTerminated()){ }
                        output.append("All threads have finished" + newline);   
                        output.setCaretPosition(output.getDocument().getLength());
+                    
 
-                       
+                    } catch (Exception e) {
+                        output.append("Exception caught in thread pool block: "  + newline);
+                        output.append(e.getMessage() + newline);
+                        output.setCaretPosition(output.getDocument().getLength());
                     }
-                    //Accept blocks until someone connects..
-                    
-                    /*##################################################################*/
-                    /*
-                    output.append("Accepted connection from client" + newline);   
-                    output.setCaretPosition(output.getDocument().getLength());
-                    
-                    //getInputStream -> InputStreamReader converts byte stream to char stream. BufferedReader is a buffer for storing char from stream
-                    in = new BufferedReader(
-                        new InputStreamReader(this.clientSocket.getInputStream()));
-                    out = new PrintStream(
-                        this.clientSocket.getOutputStream());
-                    
 
-                    // waits for data and reads it in until connection dies
-                    // readLine() blocks until the server receives a new line from client
-                    String s;
-                        while ((s = in.readLine()) != null) {
-
-                            if(s.equals("end")){
-                                System.out.println(s);
-                                output.append("Client disconnected" + newline);
-                                output.setCaretPosition(output.getDocument().getLength());
-                                in.close();
-                                break;
-                            }
-
-                            else{
-                                //Write back to client, write clients message in GUI and flush output.
-                                out.println(s);
-                                output.append(s + newline);
-                                output.setCaretPosition(output.getDocument().getLength());
-                                out.flush();
-                            }
-
-                        }
-                    //out.close();
-                    clientSocket.close();
-                    //When we reach end of try block, echo server thread should die...
-                    */
-                    /* ###################################################################### */
-
-                    } 
-
-              
-                catch (IOException e) {
-                    String s = "Exception caught when trying accepting client:" + this.portNr + newline + e.getMessage() + newline;
-                    output.append(s + newline);
-                    output.setCaretPosition(output.getDocument().getLength());
-            }
 }
         
 
